@@ -5,11 +5,11 @@
   "author": "koik",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cairodavila/tisco.git"
+    "url": "git+https://github.com/ailiahq/tisco.git"
   },
-  "homepage": "https://github.com/cairodavila/tisco#readme",
+  "homepage": "https://github.com/ailiahq/tisco#readme",
   "bugs": {
-    "url": "https://github.com/cairodavila/tisco/issues"
+    "url": "https://github.com/ailiahq/tisco/issues"
   },
   "type": "module",
   "bin": {

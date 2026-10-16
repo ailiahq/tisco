@@ -1,0 +1,18 @@
+when:
+  - event: tag
+    ref: refs/tags/v*
+
+depends_on: [ci]
+
+steps:
+  - name: publish
+    image: node:22-bookworm
+    environment:
+      NPM_TOKEN:
+        from_secret: npm_token
+    commands:
+      - test "v$(node -p 'require("./package.json").version')" = "$CI_COMMIT_TAG" || { echo "tag $CI_COMMIT_TAG != package.json version"; exit 1; }
+      - npm install -g pnpm@10
+      - pnpm install --frozen-lockfile
+      - echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
+      - pnpm publish --access public --no-git-checks

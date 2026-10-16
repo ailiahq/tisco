@@ -52,7 +52,7 @@ on first use, tisco asks permission to scan the folder, then offers to transcrib
 <summary>run from source</summary>
 
 ```sh
-git clone https://github.com/cairodavila/tisco.git
+git clone https://github.com/ailiahq/tisco.git
 cd tisco
 pnpm install
 pnpm build
