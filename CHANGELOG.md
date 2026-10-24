@@ -2,6 +2,18 @@
 
 every release of tisco, newest first. versions follow [semver](https://semver.org).
 
+## [0.5.1] · 2026-10-24
+
+first npm release of 0.5.0's changes. 0.5.0 only reached GitHub Packages: a test fixture failed CI on ffmpeg 5.1, so the npm release never ran.
+
+### changed
+
+- the changelog ships in the package.
+
+### fixed
+
+- the stills test builds its rotated fixture on ffmpeg 5.x too.
+
 ## [0.5.0] · 2026-10-24
 
 ### added
@@ -61,6 +73,7 @@ first public release, on npm as `@ailia/tisco`.
 - `/undo` restores the latest applied plan from its journal.
 - tisco asks before scanning a directory and before uploading any audio.
 
+[0.5.1]: https://github.com/ailiahq/tisco/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/ailiahq/tisco/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/ailiahq/tisco/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/ailiahq/tisco/compare/v0.3.1...v0.4.0
