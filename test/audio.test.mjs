@@ -106,7 +106,9 @@ test('stills fit Jev image limits for any orientation, and the source is untouch
   await makeSource(dir, 'tiny.mov', video('160x120'));
   // A phone clip: stored landscape with a 90° display matrix, so it plays portrait.
   const landscape = await makeSource(dir, 'landscape.mov', video('640x360'));
-  await makeSource(dir, 'phone.mov', ['-display_rotation', '90', '-i', landscape, '-c', 'copy']);
+  // -display_rotation is ffmpeg 6+; 5.x (Debian bookworm, CI) only honours the legacy rotate tag.
+  await makeSource(dir, 'phone.mov', ['-display_rotation', '90', '-i', landscape, '-c', 'copy'])
+    .catch(() => makeSource(dir, 'phone.mov', ['-i', landscape, '-c', 'copy', '-metadata:s:v:0', 'rotate=90']));
   const workspace = new Workspace(dir);
   const sizes = {};
   for (const name of ['wide.mov', 'banner.mov', 'tiny.mov', 'phone.mov']) {
