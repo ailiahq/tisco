@@ -10,7 +10,7 @@ ask questions about video transcripts, then organize the matching clips from you
 [![OpenRouter](https://img.shields.io/badge/models-OpenRouter-6366F1?style=flat-square)](https://openrouter.ai/)
 [![MIT license](https://img.shields.io/badge/license-MIT-64748B?style=flat-square)](LICENSE)
 
-[quick start](#quick-start) · [how it works](#how-it-works) · [commands](#commands) · [privacy](#privacy) · [development](#development)
+[quick start](#quick-start) · [how it works](#how-it-works) · [commands](#commands) · [privacy](#privacy) · [development](#development) · [changelog](CHANGELOG.md)
 
 </div>
 
@@ -144,7 +144,7 @@ all proposed names are editable before approval. transcript openings are not gen
 
 | stays local | sent through OpenRouter |
 | :--- | :--- |
-| original videos, file operations, and undo journals | extracted audio when you approve transcription |
+| original videos, file operations, and undo journals | extracted audio when you approve transcription, and three stills per clip when you approve a request about how the footage looks |
 | directory permissions and cached evidence | your request, project context, transcript text and timings, and reference transcripts for comparisons |
 
 transcription uses **mono MP3 at no more than 16 kHz**, extracted locally. lower-rate audio is not upsampled. in one 19-clip test, 1.7 GB of video became 2.24 MB of uploaded audio.
@@ -200,7 +200,7 @@ pnpm eval:wording  # Jev wording checks
 pnpm eval:naming   # naming and follow-up scope checks
 ```
 
-the `0.4.0` verification run had **92 passing tests and one optional footage test skipped**. the terminal walkthrough covers authorization, findings, local detail inspection, uncertainty across follow-ups, editable names, action approval, and undo.
+the `0.5.0` verification run had **96 passing tests and one optional footage test skipped**. the terminal walkthrough covers authorization, findings, local detail inspection, uncertainty across follow-ups, editable names, action approval, and undo.
 
 </details>
 
