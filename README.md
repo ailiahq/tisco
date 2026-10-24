@@ -18,6 +18,8 @@ ask questions about video transcripts, then organize the matching clips from you
 
 ## from a question to a folder
 
+<p align="center"><img src="assets/tisco-demo.gif" width="880" alt="tisco in a terminal: a plain-language request is interpreted, three clips are judged as match, review and no match, the matching clip is moved into a new folder after approval, and /undo restores the original paths"></p>
+
 ```text
 which clips mention the warranty?
 move the results into "warranty"
@@ -67,6 +69,8 @@ node dist/cli.js ~/shoot
 
 type a request in plain language. tisco resolves which clips to search before judging their transcripts. name an existing source folder when you want to limit the search:
 
+<p align="center"><img src="assets/ask.gif" width="720" alt="typing 'find the prepared takes and put them in selects' at the what now? prompt; tisco shows the understood request, the search scope, and that 3 clips were judged"></p>
+
 ```text
 from the "relevant videos" folder, which clips contain incomplete sentences?
 ```
@@ -76,6 +80,8 @@ Jev chooses among the folders tisco actually found; it does not invent a path. f
 Jev judges against the whole workspace, not one clip in isolation: the directory structure, folder membership, transcripts, earlier findings, and your selections travel in one shared state, and a clip's questions are answered in a single batch against it.
 
 ### 2. read the findings
+
+<p align="center"><img src="assets/findings.gif" width="720" alt="the findings box: 01-intro.MOV is a MATCH at 0.93, 02-setup.MOV needs REVIEW at 0.50, 03-detail.MOV is NO MATCH at 0.07, each with its transcript opening"></p>
 
 | finding | meaning | selected by default? |
 | :--- | :--- | :---: |
@@ -89,6 +95,8 @@ use `/details` to inspect the probabilities, skipped checks, and full transcript
 ### 3. approve the exact changes
 
 an action preview shows every source and destination path:
+
+<p align="center"><img src="assets/approve.gif" width="720" alt="the action preview with the review row left unchecked, applying the two ready actions, then /undo restoring the original paths"></p>
 
 ```text
 [x] CREATE warranty/
