@@ -1,0 +1,47 @@
+---
+# npmjs releases run on Woodpecker (.woodpecker/release.yaml).
+# This mirrors each v* tag to GitHub Packages, whose npm scope must
+# match the owning org: @ailiahq, not @ailia.
+name: GitHub Packages
+
+"on":
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      # v6.1.0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: 10
+      # v7.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+          scope: '@ailiahq'
+          # release job: no shared dependency cache to poison
+          package-manager-cache: false
+      - name: Tag matches package.json version
+        run: |
+          version="v$(node -p 'require("./package.json").version')"
+          test "$version" = "$GITHUB_REF_NAME" || {
+            echo "tag $GITHUB_REF_NAME != package.json $version"
+            exit 1
+          }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: npm pkg set name=@ailiahq/tisco
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
