@@ -3,10 +3,27 @@ import { object, probability, text } from './types.js';
 import type { Answers, Question } from './types.js';
 
 export const STT_MODEL = 'microsoft/mai-transcribe-2';
-export const JEV_MODEL = 'typesafe/jev-1.13';
+export const JEV_MODEL = 'typesafe/jev-1.14';
 const ORIGIN = 'https://openrouter.ai';
 export const MAX_STATE_BYTES = 96_000;
 export const MAX_DECISION_BYTES = 180_000;
+/** Inline images get their own budget, well under TypeSafe's 32 MiB request limit. */
+export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/** Text and inline-image bytes, measured apart so stills never crowd out transcript evidence. */
+export function requestBytes(value: unknown): { text: number; images: number } {
+  let images = 0;
+  const text = Buffer.byteLength(JSON.stringify(value, (key, item: unknown) => {
+    if (key === 'url' && typeof item === 'string' && item.startsWith('data:image/')) { images += item.length; return ''; }
+    return item;
+  }));
+  return { text, images };
+}
+
+export function fitsDecision(state: unknown, questions: unknown): boolean {
+  const request = requestBytes({ model: JEV_MODEL, state, questions });
+  return requestBytes(state).text <= MAX_STATE_BYTES && request.text <= MAX_DECISION_BYTES && request.images <= MAX_IMAGE_BYTES;
+}
 
 export class OpenRouter {
   constructor(private key: string, private fetcher: typeof fetch = fetch) {
@@ -59,7 +76,7 @@ export class OpenRouter {
 
   async decide(state: unknown, questions: Record<string, Question>): Promise<Answers> {
     const request = { model: JEV_MODEL, state, questions };
-    if (Buffer.byteLength(JSON.stringify(state)) > MAX_STATE_BYTES || Buffer.byteLength(JSON.stringify(request)) > MAX_DECISION_BYTES) {
+    if (!fitsDecision(state, questions)) {
       throw new Error(`Context exceeds tisco's Jev guard. Split the workspace state; nothing was truncated.`);
     }
     const result = await this.post('/api/alpha/decisions', request);

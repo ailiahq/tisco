@@ -14,9 +14,10 @@ export function findingSummary(decisions: Decision[]): string {
 export function findingLines(decisions: Decision[], evidence: Evidence[]): string {
   return decisions.map(item => {
     const score = item.answers.matches_request;
+    const look = item.answers.matches_picture;
     const transcript = evidence.find(row => row.clip.path === item.path)?.transcript;
     const text = transcript ? safeDisplay(transcriptText(transcript)).trim() : '';
-    return `${findingLabel(item)}  ${safeDisplay(item.path)}${score ? ` · match ${answerLabel(score)}` : ''}${item.cached ? ' · cached' : ''}\n` +
+    return `${findingLabel(item)}  ${safeDisplay(item.path)}${score ? ` · match ${answerLabel(score)}` : ''}${look ? ` · look ${answerLabel(look)}` : ''}${item.cached ? ' · cached' : ''}\n` +
       `  ${safeDisplay(item.error ?? item.reason)}\n` +
       (text ? `  Transcript opening: “${text.slice(0, 140)}${text.length > 140 ? '…' : ''}”` : '  No transcribed words. This does not prove silence.');
   }).join('\n\n');

@@ -31,6 +31,8 @@ export type Mode = 'scripted' | 'quiet' | 'redundant' | 'custom' | 'all';
  * limitation is reported to the user in their own terms instead of a generic "not sure".
  */
 export type Unjudgeable = 'picture' | 'sound' | 'measured' | 'without_record';
+/** Jev 1.14 judges the picture from sampled stills; these remain out of reach. */
+export type SetAside = Exclude<Unjudgeable, 'picture'>;
 export interface ExtraQuestion { text: string; gate: 'yes' | 'no' | 'info' }
 export interface Rule {
   request: string;

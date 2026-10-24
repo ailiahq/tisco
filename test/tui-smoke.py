@@ -165,16 +165,33 @@ with tempfile.TemporaryDirectory(prefix='tisco-tui-') as base:
         for name in ['01-intro.MOV', '02-setup.MOV', '03-detail.MOV']:
             assert (root / 'selects' / name).exists(), name
 
-        # 6. a request that asks only for something a transcript cannot decide is refused
-        # before any transcript is paid for, and leaves every file where it was.
+        # 6. a request that asks only for something neither words nor stills can decide is
+        # refused before any transcript is paid for, and leaves every file where it was.
         before = sorted(path.name for path in (root / 'selects').iterdir())
         terminal.expect('what now?')
-        terminal.send('separate the clips where he is smiling into selects\r')
+        terminal.send('separate the clips with clean audio into selects\r')
         terminal.expect('Request interpreted')
         terminal.expect('Nothing was judged and nothing was changed')
-        terminal.expect('how the footage looks')
+        terminal.expect('how the footage sounds')
         assert sorted(path.name for path in (root / 'selects').iterdir()) == before, 'a refused request moves nothing'
         assert not (root / 'falas').exists(), 'a refused request plans nothing'
+
+        # 6b. a request about how the footage looks is judged from stills, after its own
+        # upload consent, and never asks about the words.
+        terminal.expect('what now?')
+        terminal.send('which clips show him smiling?\r')
+        terminal.expect('Request interpreted')
+        terminal.expect('sampled stills match')
+        terminal.expect('3 stills per clip')
+        terminal.expect('Where should I look?')
+        terminal.send('\r')
+        terminal.expect('Upload 9 still(s) from 3 clip(s) to OpenRouter?')
+        terminal.send('y')
+        terminal.expect('Stills ready · 3 clip(s)')
+        terminal.expect('clip(s) judged')
+        terminal.expect('look 0.92')
+        terminal.expect('Find only · 1 selected match(es), 1 review candidate(s). No files changed.')
+        assert sorted(path.name for path in (root / 'selects').iterdir()) == before, 'a find-only look moves nothing'
 
         # 7. a request that mixes a sound request into a spoken one is still judged, on its
         # words, and the clip call carries the part that was set aside.
@@ -202,12 +219,13 @@ with tempfile.TemporaryDirectory(prefix='tisco-tui-') as base:
         terminal.finish()
 
         calls = [json.loads(line) for line in log_path.read_text().splitlines()]
-        assert all(call['model'] == 'typesafe/jev-1.13' for call in calls)
-        assert len(calls) == 9, len(calls)
+        assert all(call['model'] == 'typesafe/jev-1.14' for call in calls)
+        assert len(calls) == 11, len(calls)
         instruction = lambda call: call['state']['instruction']
         routes = [call for call in calls if 'target_set' in call['questions']]
         clips = [call for call in calls if any('__matches_request' in question for question in call['questions'])]
-        assert len(routes) == 6 and len(clips) == 3, (len(routes), len(clips))
+        looks = [call for call in calls if any('__matches_picture' in question for question in call['questions'])]
+        assert len(routes) == 7 and len(clips) == 3 and len(looks) == 1, (len(routes), len(clips), len(looks))
 
         first = routes[0]['questions']
         for question in ['ops_find', 'ops_create', 'ops_move', 'ops_rename', 'criterion_requested', 'target_set']:
@@ -230,8 +248,15 @@ with tempfile.TemporaryDirectory(prefix='tisco-tui-') as base:
         assert not has_reference(routes[2]) and not has_reference(routes[3]), 'undo removed falas/, so the gate closes again'
         assert len([call for call in routes if 'create a folder called drafts' in instruction(call)]) == 1
         # A refused request is judged on nothing at all, and route itself takes one call.
-        refused = [call for call in calls if instruction(call).endswith('smiling into selects')]
+        refused = [call for call in calls if instruction(call).endswith('clean audio into selects')]
         assert len(refused) == 1 and not any(any('__' in question for question in call['questions']) for call in refused), 'a refused request judges no clip'
+        # A look is judged on stills that travel with each judged clip, and only there.
+        look = looks[0]
+        assert 'unjudgeable' not in look['state'], 'nothing is set aside from a pure look'
+        assert not any(question.endswith('__matches_request') for question in look['questions']), 'a pure look never asks about the words'
+        for video in look['state']['workspace']['videos']:
+            assert len(video['frames']) == 3 and all(frame['image']['image_url']['url'].startswith('data:image/jpeg;base64,') for frame in video['frames']), video['path']
+        assert all('frames' not in video for call in calls if call is not look for video in call['state'].get('workspace', {}).get('videos', [])), 'stills are sent only with picture questions'
         # A mixed request is judged on what was said, with all clips batched against one state.
         mixed = [call for call in clips if 'clean audio' in instruction(call)]
         assert len(mixed) == 1 and mixed[0]['state']['unjudgeable'] == ['sound'], 'the set-aside part travels with the evidence'

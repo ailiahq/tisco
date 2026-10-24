@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import * as ui from '@clack/prompts';
 import { Workspace, inFolder, validateFolder } from './workspace.js';
-import { JEV_MODEL, MAX_DECISION_BYTES, MAX_STATE_BYTES, OpenRouter } from './openrouter.js';
+import { JEV_MODEL, MAX_STATE_BYTES, OpenRouter, fitsDecision } from './openrouter.js';
 import { answerLabel, clipQuestionIds, feasibilityFromRoute, folderRelationBatch, folderSuggestion, modeFromRoute, recommend, referenceFromRoute, routeYes, scopeFromRoute, workspaceDecisions, workspaceQuestionBatch, workspaceRouteRequest } from './decisions.js';
 import type { ClipOptions, WorkspaceQuestionBatch } from './decisions.js';
 import { buildPlan, executePlan, validateSuffix } from './plan.js';
@@ -9,12 +9,13 @@ import { chosenName, namingCandidates, suggestedStem, transcriptText, validateSt
 import { findingLabel, findingLines, findingSummary } from './findings.js';
 import { cachedDecision, decisionKey, saveDecision } from './cache.js';
 import { approveReady, approveWithDependencies, blockedActions, blockedReason, executionOrder, readyActions, setApproved } from './actions.js';
-import { cachedTranscript, checkMediaTools, exportReview, hostCapabilities, importAssemblyAI, transcribeClip } from './media.js';
+import { cachedTranscript, checkMediaTools, exportReview, extractFrames, FRAME_COUNT, FRAME_SPEC, hostCapabilities, importAssemblyAI, transcribeClip } from './media.js';
+import type { Frame } from './media.js';
 import { ask, confirm, errorMessage, input, Cancelled } from './ask.js';
 import { safeDisplay } from './types.js';
 import { workspaceDigest, workspaceProjection, workspaceSnapshot, workspaceState } from './workspace-state.js';
 import type { WorkspaceSnapshot, WorkspaceStateOptions } from './workspace-state.js';
-import type { Clip, Decision, Evidence, Mode, Rule, Unjudgeable } from './types.js';
+import type { Clip, Decision, Evidence, Mode, Rule, SetAside, Unjudgeable } from './types.js';
 import type { Plan, PlanAction } from './actions.js';
 import type { PlanIntent, RenameSpec } from './plan.js';
 
@@ -130,14 +131,19 @@ interface Interpretation {
   suffix?: string;
   /** False when nothing the request asks for can be decided from what was said. */
   spoken: boolean;
-  aspects: Unjudgeable[];
-  /** True when the request asks only for things a transcript cannot decide: refuse it. */
+  /** The request asks how the footage looks: judge it from sampled stills. */
+  picture: boolean;
+  /** ...and asks for nothing the words can decide. */
+  pictureOnly: boolean;
+  aspects: SetAside[];
+  /** What the words question must ignore: set-aside parts, plus the look when stills judge it. */
+  unjudgeable: Unjudgeable[];
+  /** True when the request asks only for things neither words nor stills can decide: refuse it. */
   limited: boolean;
 }
 
-/** What a transcript cannot decide, in the words the user used when they asked for it. */
-const ASPECT_LIMIT: Record<Unjudgeable, string> = {
-  picture: 'how the footage looks — framing, focus, lighting, what is visible — which needs watching the picture',
+/** What neither words nor stills can decide, in the words the user used when they asked for it. */
+const ASPECT_LIMIT: Record<SetAside, string> = {
   sound: 'how the footage sounds — noise, wind, echo, loudness — which needs listening to the audio',
   measured: 'a measurement of the files — duration, resolution, time of day — which is not part of this release',
   without_record: 'something that is in neither the footage nor the files — which clip was used before, or which take someone will like best',
@@ -182,6 +188,8 @@ async function interpretRequest(client: OpenRouter, request: string, folders: st
     folder: chosenName(route, 'destination_name', namingCandidates(request)),
     suffix: chosenName(route, 'rename_suffix', namingCandidates(request)),
     spoken: feasibility.spoken, aspects: criterion ? feasibility.aspects : [], limited: criterion && feasibility.limited,
+    picture: criterion && feasibility.picture, pictureOnly: criterion && feasibility.pictureOnly,
+    unjudgeable: criterion ? feasibility.unjudgeable : [],
   };
 }
 
@@ -230,7 +238,8 @@ function reportDecisions(decisions: Decision[], evidence: Evidence[], showAll = 
   const visible = showAll ? sorted : sorted.slice(0, 12);
   ui.note(findingLines(visible, evidence), `Findings · ${findingSummary(decisions)}`);
   if (visible.length < sorted.length) ui.log.info(`Showing ${visible.length} of ${sorted.length} findings. /results shows every row; nothing is excluded from the count or evidence.`);
-  ui.log.info('Transcripts, not picture or sound quality. Excerpts are openings, not model citations. /details shows full evidence; /select changes the selection.');
+  const stills = decisions.some(item => item.answers.matches_picture) ? ` and ${FRAME_COUNT} stills per clip` : '';
+  ui.log.info(`Transcripts${stills}, not ${stills ? 'motion' : 'picture'} or sound quality. Excerpts are openings, not model citations. /details shows full evidence; /select changes the selection.`);
 }
 
 async function approvePlan(plan: Plan): Promise<Plan | 'edit' | undefined> {
@@ -324,17 +333,14 @@ interface WorkspaceDecisionBatch {
   state: Record<string, unknown>;
 }
 
-function fitsDecision(state: Record<string, unknown>, questions: WorkspaceQuestionBatch['questions']): boolean {
-  return Buffer.byteLength(JSON.stringify(state)) <= MAX_STATE_BYTES &&
-    Buffer.byteLength(JSON.stringify({ model: JEV_MODEL, state, questions })) <= MAX_DECISION_BYTES;
-}
-
 export function workspaceDecisionBatches(snapshot: WorkspaceSnapshot, paths: string[], rule: Rule, options: ClipOptions, stateOptions: WorkspaceStateOptions): WorkspaceDecisionBatch[] {
   const prepare = (selected: string[], detailed: Set<string>, complete: boolean): WorkspaceDecisionBatch => {
     const projected = complete ? snapshot : workspaceProjection(snapshot, detailed);
     const state = workspaceState(projected, {
       ...stateOptions,
       manifestOnlyVideos: complete ? [] : snapshot.videos.filter(video => !detailed.has(video.path)).map(video => video.path),
+      // Stills travel only with the clips this batch judges, never with references.
+      frames: stateOptions.frames && Object.fromEntries(selected.flatMap(path => stateOptions.frames?.[path] ? [[path, stateOptions.frames[path]]] : [])),
     });
     return { questions: workspaceQuestionBatch(projected, selected, rule, options), state };
   };
@@ -436,20 +442,21 @@ async function oneRequest(request: string, deps: LoopDeps, state: SessionState):
   finally { spin.stop('Request interpreted'); }
 
   const ops = OPERATIONS.filter(op => view.operations[op]);
-  ui.note(`“${safeDisplay(request)}”\n${view.criterion ? 'Find clips matching the spoken-content condition.' : 'Use the scoped clips without content filtering.'}\n${view.operations.move || view.operations.rename || view.operations.create ? `Then preview: ${ops.filter(op => op !== 'find').join(' + ')}. Approval is required before changing files.` : 'Find only: show results, leave files untouched.'}${view.reference ? `\nCompare against: ${safeDisplay(view.reference)}` : ''}`, 'Understood request');
+  ui.note(`“${safeDisplay(request)}”\n${!view.criterion ? 'Use the scoped clips without content filtering.' : view.pictureOnly ? 'Find clips whose sampled stills match the condition.' : view.picture ? 'Find clips matching the spoken and visual conditions.' : 'Find clips matching the spoken-content condition.'}\n${view.operations.move || view.operations.rename || view.operations.create ? `Then preview: ${ops.filter(op => op !== 'find').join(' + ')}. Approval is required before changing files.` : 'Find only: show results, leave files untouched.'}${view.reference ? `\nCompare against: ${safeDisplay(view.reference)}` : ''}`, 'Understood request');
   if (!ops.length) { ui.log.info('Nothing to plan. Rephrase the request, for example: move the prepared takes to falas.'); return; }
 
-  // A request that asks only for something a transcript cannot decide is refused before
-  // any transcript is paid for: judging it anyway would return nothing but near-ties, and
+  // A request that asks only for something neither words nor stills can decide is refused
+  // before any transcript is paid for: judging it anyway would return nothing but near-ties, and
   // a plan built from those would be a guess dressed as evidence.
   const limits = view.aspects.map(aspect => ASPECT_LIMIT[aspect]);
   const limit = limits.join('; and ');
   if (view.limited) {
     ui.log.warn(`Nothing was judged and nothing was changed: this request asks for ${limit || 'something a transcript cannot decide'}.`);
-    ui.log.info('Say what is said in the clips instead — "the takes where they explain the price" — or ask me to move every clip, and I will.');
+    ui.log.info('Say what is said or shown in the clips instead — "the takes where they explain the price", "the clips where he is smiling" — or ask me to move every clip, and I will.');
     return;
   }
-  if (limit) ui.log.info(`Part of this request asks for ${limit}. I judge what was said and leave those parts out.`);
+  if (limit) ui.log.info(`Part of this request asks for ${limit}. I judge what was ${view.picture ? 'said and shown' : 'said'} and leave those parts out.`);
+  if (view.picture) ui.log.info(`How the footage looks is judged from ${FRAME_COUNT} stills per clip (start, middle, end), not the full motion.`);
 
   const scoped = resolveScope(clips, view.scope, state, routeFolders);
   let targets = scoped.candidates;
@@ -467,8 +474,8 @@ async function oneRequest(request: string, deps: LoopDeps, state: SessionState):
     snapshot = workspaceSnapshot(inventory, evidence);
     const targetEvidence = evidence.filter(item => targets.some(clip => clip.path === item.clip.path));
     const references = view.reference ? clips.filter(clip => inFolder(clip.path, view.reference ?? '')) : [];
-    const rule: Rule = { request, context: deps.getContext(), mode: view.mode, destination: '', reference: view.reference, threshold: 0.8, extra: [], unjudgeable: view.aspects };
-    const options = { hasCriterion: view.criterion, hasReference: references.length > 0 };
+    const rule: Rule = { request, context: deps.getContext(), mode: view.mode, destination: '', reference: view.reference, threshold: 0.8, extra: [], unjudgeable: view.unjudgeable };
+    const options = { hasCriterion: view.criterion, hasReference: references.length > 0, hasSpoken: !view.pictureOnly, hasPicture: view.picture };
     const questionIds = clipQuestionIds(rule, options);
     const digest = workspaceDigest(snapshot);
     const decisions: Decision[] = [];
@@ -481,11 +488,29 @@ async function oneRequest(request: string, deps: LoopDeps, state: SessionState):
         continue;
       }
       const questionSignature = JSON.stringify(workspaceQuestionBatch(snapshot, [item.clip.path], rule, options).questions);
-      const key = decisionKey({ model: JEV_MODEL, request, context: rule.context, mode: rule.mode, reference: rule.reference, unjudgeable: rule.unjudgeable, questions: questionIds, questionSignature, workspace: digest, clip: { path: item.clip.path, ...item.transcript.source }, references: [] });
+      const key = decisionKey({ model: JEV_MODEL, request, context: rule.context, mode: rule.mode, reference: rule.reference, unjudgeable: rule.unjudgeable, questions: questionIds, questionSignature, workspace: digest, frames: view.picture ? FRAME_SPEC : undefined, clip: { path: item.clip.path, ...item.transcript.source }, references: [] });
       keys.set(item.clip.path, key);
       const stored = await cachedDecision(deps.workspace, key);
       if (stored) { reused += 1; decisions.push({ ...stored, ...recommend(stored.answers, rule), path: item.clip.path }); }
       else missing.push(item.clip.path);
+    }
+    let frames: Record<string, Frame[]> | undefined;
+    if (view.picture && missing.length) {
+      ui.note(`${FRAME_COUNT} stills per clip are extracted locally, then sent to OpenRouter / Jev with the transcripts. This is billed.`, 'Before upload');
+      if (!(await confirm(`Upload ${FRAME_COUNT * missing.length} still(s) from ${missing.length} clip(s) to OpenRouter?`))) throw new Cancelled();
+      const read = ui.spinner();
+      read.start(`Reading stills · ${missing.length} clip(s)`);
+      frames = {};
+      try {
+        for (const path of [...missing]) {
+          try { frames[path] = await extractFrames(deps.workspace, clips.find(clip => clip.path === path)!); }
+          catch (error) {
+            // A clip with no readable picture is not judged at all, never judged on words alone.
+            decisions.push({ path, answers: {}, recommendation: 'review', reason: 'Not judged.', error: errorMessage(error) });
+            missing.splice(missing.indexOf(path), 1);
+          }
+        }
+      } finally { read.stop(`Stills ready · ${Object.keys(frames).length} clip(s)`); }
     }
     const judge = ui.spinner();
     judge.start(`Judging shared workspace · ${missing.length} clip(s)`);
@@ -494,7 +519,8 @@ async function oneRequest(request: string, deps: LoopDeps, state: SessionState):
         const batches = workspaceDecisionBatches(snapshot, missing, rule, options, {
           ...stateOptions,
           referenceFolder: view.reference,
-          unjudgeable: view.aspects,
+          unjudgeable: view.unjudgeable,
+          frames,
         });
         for (const [index, batch] of batches.entries()) {
           judge.message(`Workspace evidence ${index + 1}/${batches.length} · ${batch.questions.entries.length} clip(s)`);

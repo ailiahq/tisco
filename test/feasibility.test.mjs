@@ -86,9 +86,10 @@ test('all feasibility questions are admitted independently', () => {
 });
 
 test('feasibility fails open when evidence is missing or inconclusive', () => {
-  assert.deepEqual(feasibilityFromRoute({}), { spoken: true, aspects: [], limited: false });
-  assert.deepEqual(feasibilityFromRoute({ spoken_content_decides: noul(0.02) }), { spoken: false, aspects: [], limited: false });
-  assert.deepEqual(feasibilityFromRoute({ spoken_content_decides: noul(0.02), needs_sound: noul(0.79) }), { spoken: false, aspects: [], limited: false });
+  const none = { picture: false, pictureOnly: false, aspects: [], unjudgeable: [], limited: false };
+  assert.deepEqual(feasibilityFromRoute({}), { spoken: true, ...none });
+  assert.deepEqual(feasibilityFromRoute({ spoken_content_decides: noul(0.02) }), { spoken: false, ...none });
+  assert.deepEqual(feasibilityFromRoute({ spoken_content_decides: noul(0.02), needs_sound: noul(0.79) }), { spoken: false, ...none });
 });
 
 test('a request is refused only when a limitation is clear and the words are not', () => {
@@ -107,7 +108,39 @@ test('independent Nouls preserve multiple simultaneous limitations', () => {
     needs_measurement: noul(0.08),
     needs_external_record: noul(0.05),
   });
-  assert.deepEqual(result, { spoken: true, aspects: ['picture', 'sound'], limited: false });
+  assert.deepEqual(result, { spoken: true, picture: true, pictureOnly: false, aspects: ['sound'], unjudgeable: ['picture', 'sound'], limited: false });
+});
+
+test('a look is judged from stills, never a reason to refuse', () => {
+  const at = (spoken, picture, sound = 0.05) => feasibilityFromRoute({ spoken_content_decides: noul(spoken), needs_picture: noul(picture), needs_sound: noul(sound) });
+  assert.deepEqual(at(0.05, 0.95), { spoken: false, picture: true, pictureOnly: true, aspects: [], unjudgeable: [], limited: false });
+  // Measured live: "find the clips with a red background" read spoken 0.68. Asking the words
+  // too let an irrelevant 0.11 veto a 0.99 look, so an unsure words answer means look only.
+  assert.equal(at(0.68, 0.95).pictureOnly, true, 'words that do not confidently decide are not asked');
+  assert.deepEqual(at(0.9, 0.95).unjudgeable, ['picture'], 'mixed: the words question ignores the look the stills judge');
+  assert.deepEqual(at(0.05, 0.95, 0.95), { spoken: false, picture: true, pictureOnly: true, aspects: ['sound'], unjudgeable: ['sound'], limited: false }, 'look + sound: judge the look, set the sound aside');
+});
+
+test('picture-only requests ask about the stills and not the words', () => {
+  const rule = { request: 'the clips where he is smiling', context: '', mode: 'custom', destination: 'selects', reference: null, threshold: 0.8, extra: [] };
+  const ids = options => clipQuestionIds(rule, { hasCriterion: true, hasReference: false, ...options });
+  assert.ok(!ids({}).includes('matches_picture'), 'no stills, no picture question');
+  assert.ok(ids({ hasPicture: true }).includes('matches_picture') && ids({ hasPicture: true }).includes('matches_request'));
+  const only = ids({ hasPicture: true, hasSpoken: false });
+  assert.ok(only.includes('matches_picture') && !only.includes('matches_request'), only.join());
+  const snapshot = workspaceSnapshot({ clips: [clip], folders }, [evidence]);
+  const batch = workspaceQuestionBatch(snapshot, [clip.path], rule, { hasCriterion: true, hasReference: false, hasPicture: true, hasSpoken: false });
+  assert.match(batch.questions.video_0__matches_picture.instructions, /workspace\.videos\[0\]\.frames/);
+});
+
+test('stills attach only to the named clip and are counted outside the text budget', async () => {
+  const { requestBytes } = await import('../dist/openrouter.js');
+  const snapshot = workspaceSnapshot({ clips: [clip], folders }, [evidence]);
+  const image = { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${'A'.repeat(500_000)}` } };
+  const state = workspaceState(snapshot, { instruction: 'x', projectContext: '', session: { selection: [], previousResult: [], uncertain: [] }, frames: { 'a.mov': [{ at_ms: 0, image }] } });
+  assert.equal(state.workspace.videos[0].frames.length, 1);
+  const bytes = requestBytes(state);
+  assert.ok(bytes.images >= 500_000 && bytes.text < 5_000, JSON.stringify(bytes));
 });
 
 test('set-aside parts travel with only the question that needs them', () => {

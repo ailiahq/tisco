@@ -38,7 +38,7 @@ Moves and renames can be undone with /undo.
   --version           Show version
 
 Needs Node 22.13+; ffmpeg and ffprobe on PATH for new transcriptions.
-Models: microsoft/mai-transcribe-2 and typesafe/jev-1.13, via OpenRouter only.
+Models: microsoft/mai-transcribe-2 and typesafe/jev-1.14, via OpenRouter only.
 Key: OPENROUTER_API_KEY or interactive setup. Nothing is uploaded before consent.
 Moves are previewed, never overwrite, and can be undone. No editorial deletion.
 `;
@@ -83,7 +83,7 @@ async function main(): Promise<void> {
   }
   const trust = config.directories?.[root];
   if (!trust || trust.dev !== stat.dev || trust.ino !== stat.ino) {
-    ui.note(`${safeDisplay(root)}\n\nAllow tisco to list videos in this directory and visible subfolders, read matching\ntranscript sidecars, extract audio, and write local transcripts/.tisco records?\n\nHidden directories and symlinks are skipped. Uploads and moves require separate\nconfirmation. Authorization is stored for this exact directory only.`, 'Directory access · first run');
+    ui.note(`${safeDisplay(root)}\n\nAllow tisco to list videos in this directory and visible subfolders, read matching\ntranscript sidecars, extract audio and stills, and write local transcripts/.tisco records?\n\nHidden directories and symlinks are skipped. Uploads and moves require separate\nconfirmation. Authorization is stored for this exact directory only.`, 'Directory access · first run');
     if (!(await confirm('Authorize this directory?'))) { ui.outro('Not authorized. No contents scanned.'); return; }
     config.directories = { ...config.directories, [root]: { dev: stat.dev, ino: stat.ino } };
     await saveSettings(config);

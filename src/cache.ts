@@ -22,6 +22,8 @@ export interface DecisionKeyParts {
   questionSignature: string;
   /** Full directory paths, folder membership, and transcript evidence seen by Jev. */
   workspace?: string;
+  /** How stills were sampled, when the picture was judged; the clip fingerprint covers the source. */
+  frames?: string;
   clip: Transcript;
   references: Transcript[];
 }

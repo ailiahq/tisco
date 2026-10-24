@@ -4,7 +4,7 @@ import { namingCandidates } from './naming.js';
 import { admitted, after, all, always, never, questions, report, answerValue } from './gates.js';
 import { clipQuestion, folderRelationQuestions as wireFolderRelationQuestions, routeQuestion, namingQuestions, workspaceClipQuestion } from './jev.js';
 import type { Gate, QuestionReport, QuestionSpec } from './gates.js';
-import type { Answer, Answers, Decision, Mode, Question, Rule, Unjudgeable } from './types.js';
+import type { Answer, Answers, Decision, Mode, Question, Rule, SetAside, Unjudgeable } from './types.js';
 import type { WorkspaceSnapshot } from './workspace-state.js';
 
 export const MODES: Record<Mode, string> = {
@@ -59,6 +59,10 @@ export function routeQuestions(folders: string[]): Record<string, Question> {
 export interface ClipOptions {
   hasCriterion: boolean;
   hasReference: boolean;
+  /** False only when the request asks for nothing the words can decide. */
+  hasSpoken?: boolean;
+  /** True when sampled stills travel with each clip. */
+  hasPicture?: boolean;
 }
 
 /**
@@ -70,7 +74,8 @@ export function clipSpecs(rule: Rule, options: ClipOptions): QuestionSpec[] {
   const filters = rule.mode !== 'all';
   const off = 'This request does not filter content; no judgment is needed.';
   const specs: QuestionSpec[] = [
-    spec('matches_request', 1, yesNo(filters && options.hasCriterion, filters ? 'the request states no content criterion' : off), ['instruction', 'project_context', 'current_video', 'unjudgeable'], ['clip.cleanest_take']),
+    spec('matches_request', 1, yesNo(filters && options.hasCriterion && options.hasSpoken !== false, !filters ? off : options.hasCriterion ? 'the request asks only how the footage looks' : 'the request states no content criterion'), ['instruction', 'project_context', 'current_video', 'unjudgeable'], ['clip.cleanest_take']),
+    spec('matches_picture', 1, yesNo(filters && options.hasPicture === true, filters ? 'the request asks nothing about how the footage looks' : off), ['instruction', 'current_video.frames'], []),
     spec('has_scripted_segment', 1, yesNo(filters, off), ['project_context', 'current_video'], ['clip.cleanest_take']),
     spec('has_incomplete_speech', 1, yesNo(filters, off), ['current_video'], []),
     spec('speech_kind', 1, yesNo(filters, off), ['current_video'], []),
@@ -100,12 +105,15 @@ export async function workspaceRouteRequest(client: OpenRouter, state: Record<st
 /**
  * The feasibility verdict, read fail-open: a missing answer never refuses a request.
  *
- * A request is `limited` when it asks for something reading what was said cannot decide
- * (a look, a sound, a measurement, history or taste) and the spoken part is not a
- * confident yes — the same reading the rest of the product gives an answer. Judging a
- * request like that would return nothing but near-ties, so it is refused with a reason
- * instead. Anything else is judged: with `limited` false and an aspect named, the request
- * does have a spoken part, and that part is judged while the rest is set aside.
+ * The picture is judged from sampled stills, so a look is never a reason to refuse. A
+ * request is `limited` when it asks for something neither the words nor the stills can
+ * decide (a sound, a measurement, history or taste), names no look, and the spoken part is
+ * not a confident yes — the same reading the rest of the product gives an answer. Judging
+ * a request like that would return nothing but near-ties, so it is refused with a reason
+ * instead. Anything else is judged, and the parts in `aspects` are set aside.
+ * `pictureOnly` is a look the words do not confidently decide — exactly the requests that
+ * were refused before stills existed — so only the stills are judged. `unjudgeable` is what
+ * the words question must ignore: the set-aside parts, plus the look when stills judge it.
  */
 export const ASPECT_QUESTIONS: Record<Unjudgeable, string> = {
   picture: 'needs_picture',
@@ -115,14 +123,20 @@ export const ASPECT_QUESTIONS: Record<Unjudgeable, string> = {
 };
 export const ASPECTS = Object.keys(ASPECT_QUESTIONS) as Unjudgeable[];
 
-export function feasibilityFromRoute(route: Answers, threshold = 0.8): { spoken: boolean; aspects: Unjudgeable[]; limited: boolean } {
+export interface Feasibility { spoken: boolean; picture: boolean; pictureOnly: boolean; aspects: SetAside[]; unjudgeable: Unjudgeable[]; limited: boolean }
+
+export function feasibilityFromRoute(route: Answers, threshold = 0.8): Feasibility {
   const spoken = route.spoken_content_decides;
   const decidable = !spoken || spoken.type !== 'noul' || spoken.noul >= threshold;
-  const aspects = ASPECTS.filter(aspect => {
+  const clear = ASPECTS.filter(aspect => {
     const answer = route[ASPECT_QUESTIONS[aspect]];
     return answer?.type === 'noul' && answer.noul >= threshold;
   });
-  return { spoken: decidable, aspects, limited: aspects.length > 0 && !decidable };
+  const picture = clear.includes('picture');
+  const aspects = clear.filter((aspect): aspect is SetAside => aspect !== 'picture');
+  const pictureOnly = picture && !decidable;
+  const unjudgeable: Unjudgeable[] = picture && !pictureOnly ? ['picture', ...aspects] : aspects;
+  return { spoken: decidable, picture, pictureOnly, aspects, unjudgeable, limited: aspects.length > 0 && !decidable && !picture };
 }
 
 export const routeYes = (answers: Answers, id: string): boolean => answerValue(answers[id]) === 'yes';
@@ -166,8 +180,8 @@ export function recommend(answers: Answers, rule: Rule): Pick<Decision, 'recomme
   const no = 1 - yes;
   const checks: number[] = [];
   const push = (value: number | undefined) => { if (value !== undefined) checks.push(value); };
-  if (rule.mode === 'scripted') { push(optional(answers, 'has_scripted_segment')); push(optional(answers, 'matches_request')); }
-  if (rule.mode === 'custom') push(optional(answers, 'matches_request'));
+  if (rule.mode === 'scripted') { push(optional(answers, 'has_scripted_segment')); push(optional(answers, 'matches_request')); push(optional(answers, 'matches_picture')); }
+  if (rule.mode === 'custom') { push(optional(answers, 'matches_request')); push(optional(answers, 'matches_picture')); }
   if (rule.mode === 'redundant') { push(optional(answers, 'speech_already_in_reference')); const novel = optional(answers, 'other_speech_not_in_reference'); if (novel !== undefined) checks.push(1 - novel); }
   if (rule.mode === 'quiet') {
     const speech = answers.speech_kind;
@@ -227,9 +241,12 @@ export function workspaceDecisions(batch: WorkspaceQuestionBatch, answers: Answe
       if (!answer) throw new Error(`Missing workspace answer for ${entry.path}: ${spec.id}`);
       return [spec.id, answer];
     }));
+    const asked = (id: string) => entry.specs.some(spec => spec.id === id);
     return { path: entry.path, answers: local, ...recommend(local, rule), skipped: report(clipSpecs(rule, {
-      hasCriterion: entry.specs.some(spec => spec.id === 'matches_request'),
-      hasReference: entry.specs.some(spec => spec.id === 'speech_already_in_reference'),
+      hasCriterion: asked('matches_request') || asked('matches_picture'),
+      hasReference: asked('speech_already_in_reference'),
+      hasSpoken: asked('matches_request'),
+      hasPicture: asked('matches_picture'),
     }), local) };
   });
 }

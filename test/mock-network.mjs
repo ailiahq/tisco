@@ -48,7 +48,9 @@ globalThis.fetch = async (url, init) => {
     const judgedScripted = judgedVideo.includes('01-intro');
     const judgedUnclear = judgedVideo.includes('02-setup');
     const judgedQuiet = judgedVideo.includes('03-detail');
+    if (baseId === 'matches_picture' && !request.state?.workspace?.videos?.[videoIndex]?.frames?.length) throw new Error('A picture question arrived without stills.');
     const clipNouls = {
+      matches_picture: judgedScripted ? 0.92 : judgedUnclear ? 0.55 : 0.06,
       matches_request: text.includes('nothing matches') ? 0.03 : text.includes('broader match') ? 0.95 : judgedScripted ? 0.93 : judgedUnclear ? 0.50 : 0.07,
       has_scripted_segment: judgedScripted ? 0.95 : judgedUnclear ? 0.45 : 0.05,
       has_incomplete_speech: judgedUnclear ? 0.9 : 0.05,

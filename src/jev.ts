@@ -20,7 +20,7 @@ import type { Question } from './types.js';
  */
 
 /** Sent with every decision so the model never invents a capability the release lacks. */
-export const CAPABILITIES = 'Transcript classification and reversible whole-file folder organization: find matching clips, create a directory, move files with their sidecars, and rename files with explicitly confirmed names. No deletion, shell generation, video editing, or general chat.';
+export const CAPABILITIES = 'Transcript and still-frame classification and reversible whole-file folder organization: find matching clips, create a directory, move files with their sidecars, and rename files with explicitly confirmed names. No deletion, shell generation, video editing, or general chat.';
 
 const WHAT_THE_USER_WANTS = 'The user typed the text in `instruction`. Answer with what the user wants done with their videos.';
 const noul = (instructions: string, yes: string, no: string): Question => ({ type: 'noul', instructions, criteria: { true: yes, false: no } });
@@ -115,6 +115,9 @@ function clipQuestionFor(id: string, target: string, reference: string, extra?: 
     case 'matches_request': return noul(`Does the speech in ${video} match every part of \`instruction\` that reading the words can decide? When \`unjudgeable\` is present, ignore those named parts completely.`,
       'The speech fits the decidable request: for example it covers the named topic, says the named line, contains the requested complete statement, or has the requested property of the words.',
       'The speech does not fit the decidable request, even if the clip contains other speech.');
+    case 'matches_picture': return noul(`Do the stills in ${video.slice(0, -1)}.frames\` show what \`instruction\` asks about how the footage looks? Judge only the picture; what is said is judged elsewhere. The stills are sampled at the start, middle and end of the clip.`,
+      'The stills show the requested look: for example the named expression, a visible person or object, the framing, focus, or lighting the user asked for.',
+      'The stills do not show the requested look, or show its opposite.');
     case 'has_scripted_segment': return noul(`Does ${video} contain a complete take that was prepared for an audience?`,
       'At least one take is something said to the camera for the audience to watch, for example a hook, an explanation, an invitation, an outro, or a single statement delivered to camera. It only has to be a complete thought; it does not have to be long. Retakes, mistakes and on-set talk elsewhere in the clip do not disqualify it.',
       'No complete prepared take: only incidental conversation, production directions, a fragment that starts or stops mid-sentence, or no intelligible speech.');

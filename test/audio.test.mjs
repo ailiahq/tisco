@@ -95,3 +95,35 @@ test('footage named by TISCO_TEST_FOOTAGE is measured, never uploaded', { skip: 
   }
   console.log(`${videos.length} clips: ${(sourceBytes / 1e6).toFixed(1)} MB of source -> ${(sentBytes / 1e6).toFixed(2)} MB of audio to send (${(100 * sentBytes / sourceBytes).toFixed(2)}%)`);
 });
+
+test('stills fit Jev image limits for any orientation, and the source is untouched', { skip: !hasTools }, async () => {
+  const { extractFrames, FRAME_COUNT } = await import('../dist/media.js');
+  const { Workspace, fingerprint } = await import('../dist/workspace.js');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tisco-frames-'));
+  const video = (size, extra = []) => ['-f', 'lavfi', '-i', `testsrc2=size=${size}:rate=10:duration=2`, ...extra, '-c:v', 'mjpeg'];
+  await makeSource(dir, 'wide.mov', video('1920x1080'));
+  await makeSource(dir, 'banner.mov', video('1600x200'));
+  await makeSource(dir, 'tiny.mov', video('160x120'));
+  // A phone clip: stored landscape with a 90° display matrix, so it plays portrait.
+  const landscape = await makeSource(dir, 'landscape.mov', video('640x360'));
+  await makeSource(dir, 'phone.mov', ['-display_rotation', '90', '-i', landscape, '-c', 'copy']);
+  const workspace = new Workspace(dir);
+  const sizes = {};
+  for (const name of ['wide.mov', 'banner.mov', 'tiny.mov', 'phone.mov']) {
+    const before = await fs.readFile(path.join(dir, name));
+    const frames = await extractFrames(workspace, { path: name, fingerprint: await fingerprint(path.join(dir, name)) });
+    assert.equal(frames.length, FRAME_COUNT);
+    assert.ok(frames.every((frame, i) => i === 0 || frame.at_ms > frames[i - 1].at_ms), 'stills are spread across the clip');
+    const jpeg = Buffer.from(frames[0].image.image_url.url.replace(/^data:image\/jpeg;base64,/, ''), 'base64');
+    const still = path.join(dir, `${name}.jpg`);
+    await fs.writeFile(still, jpeg);
+    const { stdout } = await exec('ffprobe', ['-v', 'error', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', still]);
+    const [w, h] = stdout.trim().split(',').map(Number);
+    assert.ok(w >= 256 && h >= 256 && w <= 1568 && h <= 1568 && w * h >= 78_400 && w * h <= 2_458_624, `${name}: ${w}x${h}`);
+    sizes[name] = [w, h];
+    assert.deepEqual(await fs.readFile(path.join(dir, name)), before);
+  }
+  assert.deepEqual(sizes['wide.mov'], [768, 432]);
+  assert.ok(sizes['phone.mov'][1] > sizes['phone.mov'][0], `portrait stays portrait: ${sizes['phone.mov']}`);
+  await assert.rejects(extractFrames(workspace, { path: 'audio.mov', fingerprint: await fingerprint(await makeSource(dir, 'audio.mov', audioArgs(['-c:a', 'pcm_s16le']))) }), /No video stream/);
+});

@@ -32,7 +32,7 @@ tisco searches what was said, shows the findings, and previews each path change.
 | :--- | :--- | :--- |
 | topics, names, lines, prepared takes, and verbal mistakes | match probabilities and full transcripts | move clips, rename files, and export review MP4s |
 
-> tisco reads transcripts, not pictures. it cannot judge focus, lighting, expressions, or recording quality.
+> tisco reads transcripts, plus three stills per clip when you ask how the footage looks ("the clips where he is smiling"). it does not watch motion or judge recording quality.
 
 ## quick start
 
@@ -152,7 +152,7 @@ transcription uses **mono MP3 at no more than 16 kHz**, extracted locally. lower
 only two models are used:
 
 - **`microsoft/mai-transcribe-2`** transcribes speech.
-- **`typesafe/jev-1.13`** returns typed judgments about requests and transcripts. code controls permissions, thresholds, paths, and file operations.
+- **`typesafe/jev-1.14`** returns typed judgments about requests, transcripts, and stills. code controls permissions, thresholds, paths, and file operations.
 
 the workspace state sent to Jev is capped at 96 KB and never silently truncated. when a workspace exceeds it, the state is split deterministically into batches and merged back into the same per-clip decisions. the OpenRouter key is never printed, stored with media, or included in model state.
 
@@ -170,7 +170,7 @@ the workspace state sent to Jev is capped at 96 KB and never silently truncated.
 
 spoken-content searches can cover topics, names, lines, explanations, prepared takes, verbal mistakes, and repetition against a retained folder.
 
-requests that depend only on picture, recording quality, duration, prior usage, or taste are refused with the missing evidence named. for mixed requests, tisco judges the spoken part and says what it left out.
+requests about how the footage looks are judged from three stills per clip (start, middle, end), extracted locally and uploaded only after a separate confirmation. requests that depend only on recording quality, duration, prior usage, or taste are refused with the missing evidence named. for mixed requests, tisco judges what was said and shown, and says what it left out.
 
 also not supported:
 

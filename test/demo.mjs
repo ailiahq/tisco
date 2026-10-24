@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { fingerprint, atomicJson } from '../dist/workspace.js';
 
@@ -14,7 +14,9 @@ const examples = [
   ['03-detail.MOV', ''],
 ];
 for (const [name, text] of examples) {
-  await fs.writeFile(path.join(root, name), 'DEMO FILE, not playable footage.');
+  // A one-second test pattern, so picture requests have stills to read offline.
+  try { execFileSync('ffmpeg', ['-nostdin', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=10:duration=1', '-c:v', 'mjpeg', '-f', 'mov', path.join(root, name)]); }
+  catch { await fs.writeFile(path.join(root, name), 'DEMO FILE, not playable footage.'); }
   const words = text ? text.split(' ').map((text, i) => ({ text, start: i * 300, end: i * 300 + 250 })) : [];
   await atomicJson(path.join(root, `${name}.tisco.json`), {
     version: 1, model: 'demo/fixture', source: await fingerprint(path.join(root, name)), prompt: 'Demo food brand',

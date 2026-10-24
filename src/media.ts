@@ -22,6 +22,7 @@ export async function checkMediaTools(): Promise<void> {
 export interface MediaInfo {
   duration: number;
   hasAudio: boolean;
+  hasVideo: boolean;
   audio: { rate: number; channels: number; streams: number };
 }
 
@@ -37,6 +38,7 @@ export async function probe(file: string): Promise<MediaInfo> {
     return {
       duration,
       hasAudio: audio.length > 0,
+      hasVideo: streams.some(stream => stream.codec_type === 'video'),
       audio: { rate: Number(first.sample_rate) || 0, channels: Number(first.channels) || 0, streams: audio.length },
     };
   } catch { throw new Error('ffprobe could not read a valid media duration/audio stream.'); }
@@ -202,6 +204,40 @@ export async function transcribeClip(
   await workspace.verify(clip);
   await atomicJson(await workspace.resolve(`${clip.path}.tisco.json`), transcript);
   return transcript;
+}
+
+/** Stills per clip for picture questions: start, middle and end of the take. */
+export const FRAME_COUNT = 3;
+/**
+ * Long side 768 px, short side padded up to 256 px: inside Jev's 256-1568 px per side and
+ * 78,400-2,458,624 px total for any aspect ratio. Scaling runs after ffmpeg's autorotate,
+ * so phone footage keeps its real orientation.
+ */
+const FRAME_FILTER = 'scale=768:768:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=max(iw\\,256):max(ih\\,256):(ow-iw)/2:(oh-ih)/2';
+export const FRAME_SPEC = `${FRAME_COUNT}x${FRAME_FILTER}`;
+
+export interface Frame {
+  at_ms: number;
+  image: { type: 'image_url'; image_url: { url: string } };
+}
+
+/** Evenly spaced JPEG stills, in memory only. The source is opened read-only. */
+export async function extractFrames(workspace: Workspace, clip: Clip, count = FRAME_COUNT): Promise<Frame[]> {
+  await workspace.verify(clip);
+  const source = await workspace.resolve(clip.path);
+  const info = await probe(source);
+  if (!info.hasVideo) throw new Error('No video stream to look at.');
+  const frames: Frame[] = [];
+  for (let index = 0; index < count; index++) {
+    const at = info.duration * (index + 0.5) / count;
+    let jpeg: Buffer;
+    try {
+      jpeg = (await exec('ffmpeg', ['-nostdin', '-v', 'error', '-protocol_whitelist', 'file,pipe', '-ss', at.toFixed(3), '-i', source, '-map', '0:v:0', '-frames:v', '1', '-vf', FRAME_FILTER, '-c:v', 'mjpeg', '-q:v', '5', '-f', 'image2pipe', 'pipe:1'], { encoding: 'buffer', timeout: 60_000, maxBuffer: 16 << 20 })).stdout;
+    } catch { throw new Error('FFmpeg frame extraction failed. Source was not changed.'); }
+    if (!jpeg.length) throw new Error('FFmpeg returned no frame.');
+    frames.push({ at_ms: Math.round(at * 1000), image: { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${jpeg.toString('base64')}` } } });
+  }
+  return frames;
 }
 
 export interface HostCapabilities {
