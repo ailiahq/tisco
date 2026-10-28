@@ -1,18 +1,45 @@
 ---
 # npmjs releases run on Woodpecker (.woodpecker/release.yaml).
-# This mirrors each v* tag to GitHub Packages, whose npm scope must
-# match the owning org: @ailiahq, not @ailia.
-name: GitHub Packages
+# On each v* tag this creates the GitHub release from CHANGELOG.md and
+# mirrors the package to GitHub Packages, whose npm scope must match the
+# owning org: @ailiahq, not @ailia. GITHUB_TOKEN is issued by GitHub for
+# each run.
+name: GitHub release
 
 "on":
   push:
     tags: ['v*']
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Tag matches package.json version
+        run: |
+          version="v$(node -p 'require("./package.json").version')"
+          test "$version" = "$GITHUB_REF_NAME" || {
+            echo "tag $GITHUB_REF_NAME != package.json $version"
+            exit 1
+          }
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 .github/release-notes.py "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" > notes.md
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists"
+          else
+            gh release create "$GITHUB_REF_NAME" --title "tisco ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag
+          fi
+
   publish:
     runs-on: ubuntu-latest
     steps:
