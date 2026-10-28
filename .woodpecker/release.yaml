@@ -6,7 +6,7 @@ depends_on: [ci]
 
 steps:
   - name: publish
-    image: node:22-bookworm
+    image: node:24-bookworm
     environment:
       NPM_TOKEN:
         from_secret: npm_token

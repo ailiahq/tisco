@@ -3,7 +3,7 @@ when:
 
 steps:
   - name: test
-    image: node:22-bookworm
+    image: node:24-bookworm
     commands:
       # ffmpeg lets the audio/export tests run instead of skipping
       - apt-get update -qq && apt-get install -y -qq --no-install-recommends ffmpeg >/dev/null
